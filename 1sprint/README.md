@@ -115,7 +115,7 @@ pytest
 ## Структура проекта
 
 ```
-CryptoCore/
+1sprint/
 ├── src/
 │   └── cryptocore/
 │       ├── __init__.py
