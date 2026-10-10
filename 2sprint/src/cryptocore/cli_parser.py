@@ -2,6 +2,8 @@ import argparse
 from pathlib import Path
 
 AES_128_KEY_LENGTH_BYTES = 16
+IV_LENGTH_BYTES = 16
+SUPPORTED_MODES = ["ecb", "cbc", "cfb", "ofb", "ctr"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,8 +21,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         required=True,
-        choices=["ecb"],
-        help="Режим работы. В этом спринте поддерживается только 'ecb'.",
+        choices=SUPPORTED_MODES,
+        help="Режим работы: ecb, cbc, cfb, ofb или ctr.",
     )
 
     operation = parser.add_mutually_exclusive_group(required=True)
@@ -31,6 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--key",
         required=True,
         help="Ключ в виде шестнадцатеричной строки (32 hex-символа / 16 байт для AES-128).",
+    )
+    parser.add_argument(
+        "--iv",
+        required=False,
+        default=None,
+        help="Вектор инициализации в hex (32 символа). Только для --decrypt в режимах "
+             "cbc, cfb, ofb, ctr; если не указан, IV читается из первых 16 байт входного файла.",
     )
     parser.add_argument("--input", required=True, help="Путь к входному файлу.")
     parser.add_argument(
@@ -66,6 +75,22 @@ def parse_and_validate(argv=None) -> argparse.Namespace:
             f"{AES_128_KEY_LENGTH_BYTES} байт ({AES_128_KEY_LENGTH_BYTES * 2} hex-символов) "
             f"для AES-128, получено {len(key_bytes)} байт"
         )
+
+    args.iv_bytes = None
+    if args.iv is not None:
+        if args.encrypt:
+            parser.error("--iv нельзя указывать при шифровании: IV генерируется автоматически")
+        if args.mode == "ecb":
+            parser.error("режим ecb не использует IV, --iv указывать нельзя")
+        try:
+            args.iv_bytes = bytes.fromhex(args.iv)
+        except ValueError:
+            parser.error("--iv должен быть корректной шестнадцатеричной строкой")
+        if len(args.iv_bytes) != IV_LENGTH_BYTES:
+            parser.error(
+                f"--iv должен содержать {IV_LENGTH_BYTES} байт ({IV_LENGTH_BYTES * 2} hex-символов), "
+                f"получено {len(args.iv_bytes)} байт"
+            )
 
     if not Path(args.input).is_file():
         parser.error(f"входной файл не найден: {args.input}")
