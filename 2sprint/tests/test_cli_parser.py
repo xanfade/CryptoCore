@@ -109,6 +109,64 @@ def test_unsupported_algorithm_is_rejected(capsys, input_file):
 def test_unsupported_mode_is_rejected(capsys, input_file):
     with pytest.raises(SystemExit) as exc_info:
         cli_parser.parse_and_validate(
-            ["--algorithm", "aes", "--mode", "cbc", "--encrypt", "--key", VALID_KEY, "--input", input_file]
+            ["--algorithm", "aes", "--mode", "xts", "--encrypt", "--key", VALID_KEY, "--input", input_file]
         )
     assert exc_info.value.code != 0
+
+
+@pytest.mark.parametrize("mode", ["ecb", "cbc", "cfb", "ofb", "ctr"])
+def test_all_modes_are_accepted(mode, input_file):
+    args = cli_parser.parse_and_validate(
+        ["--algorithm", "aes", "--mode", mode, "--encrypt", "--key", VALID_KEY, "--input", input_file]
+    )
+    assert args.mode == mode
+    assert args.iv_bytes is None
+
+
+def test_iv_is_parsed_on_decrypt(input_file):
+    iv = "aabbccddeeff00112233445566778899"
+    args = cli_parser.parse_and_validate(
+        ["--algorithm", "aes", "--mode", "cbc", "--decrypt", "--key", VALID_KEY,
+         "--iv", iv, "--input", input_file]
+    )
+    assert args.iv_bytes == bytes.fromhex(iv)
+
+
+def test_iv_on_encrypt_is_rejected(capsys, input_file):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_parser.parse_and_validate(
+            ["--algorithm", "aes", "--mode", "cbc", "--encrypt", "--key", VALID_KEY,
+             "--iv", "00" * 16, "--input", input_file]
+        )
+    assert exc_info.value.code != 0
+    assert "--iv" in capsys.readouterr().err
+
+
+def test_iv_with_ecb_is_rejected(capsys, input_file):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_parser.parse_and_validate(
+            ["--algorithm", "aes", "--mode", "ecb", "--decrypt", "--key", VALID_KEY,
+             "--iv", "00" * 16, "--input", input_file]
+        )
+    assert exc_info.value.code != 0
+    assert "ecb" in capsys.readouterr().err
+
+
+def test_non_hex_iv_is_rejected(capsys, input_file):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_parser.parse_and_validate(
+            ["--algorithm", "aes", "--mode", "ctr", "--decrypt", "--key", VALID_KEY,
+             "--iv", "zz", "--input", input_file]
+        )
+    assert exc_info.value.code != 0
+    assert "шестнадцатеричн" in capsys.readouterr().err.lower()
+
+
+def test_wrong_length_iv_is_rejected(capsys, input_file):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_parser.parse_and_validate(
+            ["--algorithm", "aes", "--mode", "ctr", "--decrypt", "--key", VALID_KEY,
+             "--iv", "aabb", "--input", input_file]
+        )
+    assert exc_info.value.code != 0
+    assert "16 байт" in capsys.readouterr().err
