@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cryptocore"
-version = "0.1.0"
+version = "0.2.0"
 description = "A command-line tool for block cipher operations."
 requires-python = ">=3.8"
 dependencies = [
@@ -21,3 +21,6 @@ cryptocore = "cryptocore.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
