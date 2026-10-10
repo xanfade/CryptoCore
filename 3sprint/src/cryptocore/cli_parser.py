@@ -31,8 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--key",
-        required=True,
-        help="Ключ в виде шестнадцатеричной строки (32 hex-символа / 16 байт для AES-128).",
+        required=False,
+        default=None,
+        help="Ключ в виде шестнадцатеричной строки (32 hex-символа / 16 байт для AES-128). "
+             "При шифровании можно не указывать: тогда ключ будет сгенерирован и выведен в stdout. "
+             "При расшифровании обязателен.",
     )
     parser.add_argument(
         "--iv",
@@ -63,18 +66,23 @@ def parse_and_validate(argv=None) -> argparse.Namespace:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    try:
-        key_bytes = bytes.fromhex(args.key)
-    except ValueError:
-        parser.error("--key должен быть корректной шестнадцатеричной строкой")
-        raise AssertionError("unreachable")  # parser.error() всегда завершает работу
+    key_bytes = None
+    if args.key is None:
+        if args.decrypt:
+            parser.error("--key обязателен при расшифровании")
+    else:
+        try:
+            key_bytes = bytes.fromhex(args.key)
+        except ValueError:
+            parser.error("--key должен быть корректной шестнадцатеричной строкой")
+            raise AssertionError("unreachable")  # parser.error() всегда завершает работу
 
-    if len(key_bytes) != AES_128_KEY_LENGTH_BYTES:
-        parser.error(
-            "--key должен содержать "
-            f"{AES_128_KEY_LENGTH_BYTES} байт ({AES_128_KEY_LENGTH_BYTES * 2} hex-символов) "
-            f"для AES-128, получено {len(key_bytes)} байт"
-        )
+        if len(key_bytes) != AES_128_KEY_LENGTH_BYTES:
+            parser.error(
+                "--key должен содержать "
+                f"{AES_128_KEY_LENGTH_BYTES} байт ({AES_128_KEY_LENGTH_BYTES * 2} hex-символов) "
+                f"для AES-128, получено {len(key_bytes)} байт"
+            )
 
     args.iv_bytes = None
     if args.iv is not None:
