@@ -9,3 +9,6 @@ venv/
 .pytest_cache/
 *.enc
 *.dec
+nist_test_data.bin
+random_test_data.bin
+experiments/
