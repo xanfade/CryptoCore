@@ -1,14 +1,14 @@
 # CryptoCore
 
-Инструмент командной строки для операций блочного шифра AES-128 в режиме ECB.
+Инструмент командной строки для шифрования файлов блочным шифром AES-128 в режимах ECB, CBC, CFB, OFB и CTR.
 
 ## Инструкции по сборке
 
-1. Склонируйте репозиторий и перейдите в его каталог:
+1. Склонируйте репозиторий и перейдите в каталог спринта:
 
    ```bash
    git clone <repository-url>
-   cd CryptoCore
+   cd CryptoCore/2sprint
    ```
 
 2. (Рекомендуется) Создайте и активируйте виртуальное окружение:
@@ -34,76 +34,162 @@
 ## Использование
 
 ```bash
-cryptocore --algorithm aes --mode ecb --encrypt \
-  --key 000102030405060708090a0b0c0d0e0f \
-  --input plaintext.txt \
-  --output ciphertext.enc
+cryptocore --algorithm aes --mode <режим> (--encrypt | --decrypt) \
+  --key <ключ_hex> [--iv <iv_hex>] --input <файл> [--output <файл>]
 ```
-
-```bash
-cryptocore --algorithm aes --mode ecb --decrypt \
-  --key 000102030405060708090a0b0c0d0e0f \
-  --input ciphertext.enc \
-  --output plaintext.txt
-```
-
-Если `--output` не указан, имя выходного файла определяется автоматически
-на основе `--input` (`<input>.enc` для шифрования, `<input>.dec` для
-расшифрования).
 
 ### Аргументы
 
 | Аргумент | Описание |
 | --- | --- |
-| `--algorithm` | Используемый шифр. В этом спринте поддерживается только `aes`. |
-| `--mode` | Режим работы. В этом спринте поддерживается только `ecb`. |
+| `--algorithm` | Используемый шифр. Поддерживается только `aes` (AES-128). |
+| `--mode` | Режим работы: `ecb`, `cbc`, `cfb`, `ofb` или `ctr`. |
 | `--encrypt` / `--decrypt` | Должен быть указан ровно один из этих флагов. |
 | `--key` | Ключ AES-128 в виде 32-символьной шестнадцатеричной строки (16 байт). |
+| `--iv` | Вектор инициализации в hex (32 символа, 16 байт). Только для `--decrypt` и только в режимах `cbc`, `cfb`, `ofb`, `ctr`. |
 | `--input` | Путь к входному файлу. |
-| `--output` | Путь к выходному файлу (необязательный). |
+| `--output` | Путь к выходному файлу (необязательный; по умолчанию `<input>.enc` при шифровании и `<input>.dec` при расшифровании). |
+
+### Режимы работы
+
+| Режим | Тип | Дополнение PKCS#7 | IV |
+| --- | --- | --- | --- |
+| `ecb` | блочный | да | нет |
+| `cbc` | блочный, с цепочкой блоков | да | да |
+| `cfb` | потоковый (сегмент 128 бит) | нет | да |
+| `ofb` | потоковый | нет | да |
+| `ctr` | потоковый (счётчик из IV, +1 на каждый блок) | нет | да |
+
+В потоковых режимах длина шифртекста равна длине открытого текста: последний
+неполный блок обрабатывается без изменения размера.
+
+### Обработка IV
+
+- **Шифрование** (`cbc`, `cfb`, `ofb`, `ctr`): IV генерируется автоматически
+  криптостойким генератором (`os.urandom(16)`) и записывается в **первые 16 байт**
+  выходного файла. Формат файла: `<IV (16 байт)><шифртекст>`. Флаг `--iv` при
+  шифровании запрещён — программа завершится с ошибкой.
+- **Расшифрование** без `--iv`: IV читается из первых 16 байт входного файла,
+  остальное — шифртекст. Если файл короче 16 байт, выводится ошибка.
+- **Расшифрование** с `--iv`: используется указанный IV, а входной файл целиком
+  считается шифртекстом (без IV в начале). Так расшифровываются файлы,
+  созданные другими программами, например OpenSSL.
+- Режим `ecb` IV не использует: формат файла остаётся `<шифртекст>`, а `--iv` для него запрещён.
+
+### Примеры
+
+Шифрование (IV генерируется и записывается в начало файла):
+
+```bash
+cryptocore --algorithm aes --mode cbc --encrypt \
+  --key 000102030405060708090a0b0c0d0e0f \
+  --input plaintext.txt --output ciphertext.bin
+```
+
+Расшифрование, IV берётся из файла:
+
+```bash
+cryptocore --algorithm aes --mode cbc --decrypt \
+  --key 000102030405060708090a0b0c0d0e0f \
+  --input ciphertext.bin --output decrypted.txt
+```
+
+Расшифрование с явно указанным IV (в файле только шифртекст):
+
+```bash
+cryptocore --algorithm aes --mode ctr --decrypt \
+  --key 000102030405060708090a0b0c0d0e0f \
+  --iv aabbccddeeff00112233445566778899 \
+  --input openssl_cipher.bin --output decrypted.txt
+```
 
 ## Проверка цикла шифрования/расшифрования
 
-Основной приёмочный тест: если зашифровать файл, а затем расшифровать
-результат, должен получиться файл, полностью идентичный исходному:
+Зашифрованный и затем расшифрованный файл должен полностью совпадать с исходным:
 
 ```bash
 KEY=000102030405060708090a0b0c0d0e0f
 
-cryptocore --algorithm aes --mode ecb --encrypt \
+cryptocore --algorithm aes --mode cfb --encrypt \
   --key $KEY --input original_file.txt --output ciphertext.bin
 
-cryptocore --algorithm aes --mode ecb --decrypt \
+cryptocore --algorithm aes --mode cfb --decrypt \
   --key $KEY --input ciphertext.bin --output decrypted_file.txt
 
 diff original_file.txt decrypted_file.txt && echo "Round-trip OK"
 ```
 
-`diff` не должен показывать никаких отличий.
+## Совместимость с OpenSSL
 
-### Сверка с эталонной реализацией
+Результаты CryptoCore можно сверить с OpenSSL (`openssl enc -aes-128-<режим>`)
+в обе стороны. OpenSSL по умолчанию использует дополнение PKCS#7 в режиме CBC и
+не дополняет данные в CFB, OFB и CTR, как и CryptoCore.
 
-Шифртекст, полученный CryptoCore, можно сверить с собственной реализацией
-`aes-128-ecb` из OpenSSL, поскольку обе используют дополнение PKCS#7 по
-умолчанию:
+### 1. Шифруем CryptoCore, расшифровываем OpenSSL
 
 ```bash
-cryptocore --algorithm aes --mode ecb --encrypt \
-  --key $KEY --input original_file.txt --output cryptocore.enc
+KEY=000102030405060708090a0b0c0d0e0f
 
-openssl enc -aes-128-ecb -e -K $KEY -in original_file.txt -out openssl.enc
+cryptocore --algorithm aes --mode cbc --encrypt \
+  --key $KEY --input plain.txt --output cipher.bin
 
-cmp cryptocore.enc openssl.enc && echo "Ciphertext matches OpenSSL"
+# IV — первые 16 байт файла, остальное — шифртекст
+dd if=cipher.bin of=iv.bin bs=16 count=1
+dd if=cipher.bin of=ciphertext_only.bin bs=16 skip=1
+
+openssl enc -aes-128-cbc -d -K $KEY \
+  -iv $(xxd -p iv.bin | tr -d '\n') \
+  -in ciphertext_only.bin -out decrypted.txt
+
+cmp plain.txt decrypted.txt && echo "CryptoCore -> OpenSSL OK"
 ```
 
-Оба файла шифртекста побайтово идентичны, и каждый инструмент способен
-расшифровать вывод другого.
+### 2. Шифруем OpenSSL, расшифровываем CryptoCore
+
+```bash
+IV=AABBCCDDEEFF00112233445566778899
+
+openssl enc -aes-128-cbc -K $KEY -iv $IV -in plain.txt -out openssl_cipher.bin
+
+cryptocore --algorithm aes --mode cbc --decrypt \
+  --key $KEY --iv $IV \
+  --input openssl_cipher.bin --output decrypted.txt
+
+cmp plain.txt decrypted.txt && echo "OpenSSL -> CryptoCore OK"
+```
+
+### Скрипт для всех четырёх режимов
+
+```bash
+KEY=000102030405060708090a0b0c0d0e0f
+IV=AABBCCDDEEFF00112233445566778899
+echo "Тестовое сообщение для проверки совместимости" > plain.txt
+
+for MODE in cbc cfb ofb ctr; do
+  cryptocore --algorithm aes --mode $MODE --encrypt --key $KEY \
+    --input plain.txt --output cipher.bin
+  dd if=cipher.bin of=iv.bin bs=16 count=1 2>/dev/null
+  dd if=cipher.bin of=ciphertext_only.bin bs=16 skip=1 2>/dev/null
+  openssl enc -aes-128-$MODE -d -K $KEY -iv $(xxd -p iv.bin | tr -d '\n') \
+    -in ciphertext_only.bin -out decrypted.txt
+  cmp plain.txt decrypted.txt && echo "$MODE: CryptoCore -> OpenSSL OK"
+
+  openssl enc -aes-128-$MODE -K $KEY -iv $IV -in plain.txt -out openssl_cipher.bin
+  cryptocore --algorithm aes --mode $MODE --decrypt --key $KEY --iv $IV \
+    --input openssl_cipher.bin --output decrypted.txt
+  cmp plain.txt decrypted.txt && echo "$MODE: OpenSSL -> CryptoCore OK"
+done
+```
+
+Те же проверки автоматизированы в `tests/test_interop.py` (для четырёх режимов,
+в обе стороны, на файлах разной длины; тесты пропускаются, если `openssl` не найден в `PATH`).
 
 ## Зависимости
 
 - Python 3.8+
 - [pycryptodome](https://pypi.org/project/pycryptodome/) (предоставляет примитив блочного шифра AES)
-- [pytest](https://pypi.org/project/pytest/) (для запуска набора тестов; только для разработки)
+- [pytest](https://pypi.org/project/pytest/) (для запуска тестов; только для разработки)
+- OpenSSL (необязательно; для тестов совместимости)
 
 ## Запуск тестов
 
@@ -115,15 +201,20 @@ pytest
 ## Структура проекта
 
 ```
-1sprint/
+2sprint/
 ├── src/
 │   └── cryptocore/
 │       ├── __init__.py
-│       ├── __main__.py     # Точка входа CLI
+│       ├── __main__.py     # Точка входа CLI, работа с IV в файле
 │       ├── cli_parser.py   # Разбор и проверка аргументов
-│       ├── file_io.py      # Вспомогательные функции чтения/записи бинарных файлов
+│       ├── file_io.py      # Чтение/запись бинарных файлов
 │       └── modes/
-│           └── ecb.py      # Режим ECB: дополнение, разбиение на блоки, вызовы AES
+│           ├── common.py   # Примитив AES, XOR, проверка IV
+│           ├── ecb.py      # ECB и дополнение PKCS#7
+│           ├── cbc.py      # CBC
+│           ├── cfb.py      # CFB (сегмент 128 бит)
+│           ├── ofb.py      # OFB
+│           └── ctr.py      # CTR
 ├── tests/
 ├── pyproject.toml
 ├── requirements.txt
