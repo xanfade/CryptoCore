@@ -170,3 +170,19 @@ def test_wrong_length_iv_is_rejected(capsys, input_file):
         )
     assert exc_info.value.code != 0
     assert "16 байт" in capsys.readouterr().err
+
+
+def test_key_is_optional_for_encryption(input_file):
+    args = cli_parser.parse_and_validate(
+        ["--algorithm", "aes", "--mode", "cbc", "--encrypt", "--input", input_file]
+    )
+    assert args.key_bytes is None
+
+
+def test_key_is_mandatory_for_decryption(capsys, input_file):
+    with pytest.raises(SystemExit) as exc_info:
+        cli_parser.parse_and_validate(
+            ["--algorithm", "aes", "--mode", "cbc", "--decrypt", "--input", input_file]
+        )
+    assert exc_info.value.code != 0
+    assert "--key" in capsys.readouterr().err
