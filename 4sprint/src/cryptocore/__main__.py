@@ -2,6 +2,7 @@ import sys
 
 from cryptocore.cli_parser import AES_128_KEY_LENGTH_BYTES, parse_and_validate
 from cryptocore.csprng import CSPRNGError, generate_random_bytes
+from cryptocore.dgst import run_dgst
 from cryptocore.file_io import read_file, write_file
 from cryptocore.key_checks import weak_key_reason
 from cryptocore.modes import cbc, cfb, ctr, ecb, ofb
@@ -54,6 +55,11 @@ def run(args, data: bytes) -> bytes:
 
 
 def main(argv=None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "dgst":
+        return run_dgst(argv[1:])
+
     args = parse_and_validate(argv)
 
     try:
