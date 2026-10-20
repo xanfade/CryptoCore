@@ -85,7 +85,6 @@ def test_unwritable_output_gives_error(tmp_path):
 
 
 @pytest.mark.parametrize("extra", [
-    ["--key", KEY],
     ["--mode", "cbc"],
     ["--encrypt"],
     ["--decrypt"],
@@ -96,6 +95,13 @@ def test_encryption_arguments_are_rejected(extra, tmp_path):
     result = dgst("--algorithm", "sha256", "--input", "f", *extra, cwd=tmp_path)
     assert result.returncode != 0
     assert b"unrecognized arguments" in result.stderr
+
+
+def test_key_without_hmac_or_cmac_is_rejected(tmp_path):
+    (tmp_path / "f").write_bytes(b"x")
+    result = dgst("--algorithm", "sha256", "--input", "f", "--key", KEY, cwd=tmp_path)
+    assert result.returncode != 0
+    assert "--hmac" in result.stderr.decode("utf-8")
 
 
 def test_unknown_algorithm_is_rejected(tmp_path):
