@@ -1,4 +1,5 @@
 import argparse
+import codecs
 import secrets
 import sys
 from pathlib import Path
@@ -129,7 +130,11 @@ def read_expected_mac(path: str) -> str:
     if len(raw) > MAX_EXPECTED_MAC_FILE_SIZE:
         raise ValueError(f"файл с ожидаемым значением слишком большой: {path}")
     try:
-        text = raw.decode("utf-8")
+        # перенаправление вывода в Windows PowerShell 5.1 создаёт файл UTF-16 с BOM
+        if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+            text = raw.decode("utf-16")
+        else:
+            text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise ValueError(f"файл с ожидаемым значением не является текстом: {path}") from None
 
