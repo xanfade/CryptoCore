@@ -1,12 +1,14 @@
 import sys
 
-from cryptocore.cli_parser import AES_128_KEY_LENGTH_BYTES, parse_and_validate
+from cryptocore.aead import AUTH_FAILED_MESSAGE, AuthenticationError
+from cryptocore.cli_parser import AES_128_KEY_LENGTH_BYTES, GCM_NONCE_LENGTH_BYTES, parse_and_validate
 from cryptocore.csprng import CSPRNGError, generate_random_bytes
 from cryptocore.dgst import run_dgst
 from cryptocore.file_io import read_file, write_file
 from cryptocore.key_checks import weak_key_reason
 from cryptocore.modes import cbc, cfb, ctr, ecb, ofb
 from cryptocore.modes.common import BLOCK_SIZE
+from cryptocore.modes.gcm import GCM, TAG_LENGTH
 
 IV_MODES = {"cbc": cbc, "cfb": cfb, "ofb": ofb, "ctr": ctr}
 
@@ -31,7 +33,49 @@ def prepare_key(args) -> None:
         )
 
 
+def write_stdout_line(text: str) -> None:
+    sys.stdout.buffer.write((text + "\n").encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+
+def run_gcm(args, data: bytes) -> bytes:
+    if args.encrypt:
+        if args.iv_bytes is not None:
+            print(
+                "cryptocore: предупреждение: nonce задан вручную. Повторное использование nonce с одним ключом "
+                "разрушает безопасность GCM (раскрывается XOR открытых текстов и ключ аутентификации): "
+                "используйте это только для тестов",
+                file=sys.stderr,
+            )
+            nonce = args.iv_bytes
+        else:
+            nonce = generate_random_bytes(GCM_NONCE_LENGTH_BYTES)
+        return GCM(args.key_bytes, nonce).encrypt(data, args.aad_bytes)
+
+    if args.iv_bytes is not None:
+        nonce, payload = args.iv_bytes, data
+        minimum = TAG_LENGTH
+        description = f"тег ({TAG_LENGTH} байт)"
+    else:
+        nonce, payload = data[:GCM_NONCE_LENGTH_BYTES], data[GCM_NONCE_LENGTH_BYTES:]
+        minimum = GCM_NONCE_LENGTH_BYTES + TAG_LENGTH
+        description = f"nonce ({GCM_NONCE_LENGTH_BYTES} байт) и тег ({TAG_LENGTH} байт)"
+        if len(data) < minimum:
+            raise ValueError(
+                f"входной файл слишком короткий: нужно минимум {minimum} байт ({description}), найдено {len(data)}"
+            )
+    if len(payload) < TAG_LENGTH:
+        raise ValueError(
+            f"входной файл слишком короткий: нужно минимум {minimum} байт ({description}), найдено {len(data)}"
+        )
+    ciphertext, tag = payload[:-TAG_LENGTH], payload[-TAG_LENGTH:]
+    return GCM(args.key_bytes, nonce).decrypt_detached(nonce, ciphertext, tag, args.aad_bytes)
+
+
 def run(args, data: bytes) -> bytes:
+    if args.mode == "gcm":
+        return run_gcm(args, data)
+
     if args.mode == "ecb":
         if args.encrypt:
             return ecb.encrypt(args.key_bytes, data)
@@ -70,6 +114,10 @@ def main(argv=None) -> int:
     try:
         prepare_key(args)
         result = run(args, data)
+    except AuthenticationError:
+        # расшифрованные данные не вычислялись, выходной файл не создаётся и не изменяется
+        print(f"[ERROR] {AUTH_FAILED_MESSAGE}", file=sys.stderr)
+        return 1
     except (ValueError, CSPRNGError) as exc:
         return fail(str(exc))
 
@@ -77,6 +125,9 @@ def main(argv=None) -> int:
         write_file(args.output, result)
     except OSError as exc:
         return fail(f"не удалось записать выходной файл: {exc}")
+
+    if args.mode == "gcm" and args.decrypt:
+        write_stdout_line("[SUCCESS] Decryption completed successfully")
 
     return 0
 
