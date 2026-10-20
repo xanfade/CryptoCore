@@ -3,7 +3,8 @@ from pathlib import Path
 
 AES_128_KEY_LENGTH_BYTES = 16
 IV_LENGTH_BYTES = 16
-SUPPORTED_MODES = ["ecb", "cbc", "cfb", "ofb", "ctr"]
+GCM_NONCE_LENGTH_BYTES = 12
+SUPPORTED_MODES = ["ecb", "cbc", "cfb", "ofb", "ctr", "gcm"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         required=True,
         choices=SUPPORTED_MODES,
-        help="Режим работы: ecb, cbc, cfb, ofb или ctr.",
+        help="Режим работы: ecb, cbc, cfb, ofb, ctr или gcm (шифрование с аутентификацией).",
     )
 
     operation = parser.add_mutually_exclusive_group(required=True)
@@ -38,11 +39,20 @@ def build_parser() -> argparse.ArgumentParser:
              "При расшифровании обязателен.",
     )
     parser.add_argument(
-        "--iv",
+        "--iv", "--nonce",
         required=False,
         default=None,
-        help="Вектор инициализации в hex (32 символа). Только для --decrypt в режимах "
-             "cbc, cfb, ofb, ctr; если не указан, IV читается из первых 16 байт входного файла.",
+        help="Вектор инициализации (в режиме gcm — nonce) в hex. Для cbc, cfb, ofb, ctr: 32 символа, только "
+             "для --decrypt; если не указан, IV читается из первых 16 байт входного файла. Для gcm: 24 символа "
+             "(12 байт), при расшифровании читается из первых 12 байт файла, если не указан; при шифровании "
+             "задаёт nonce вместо случайного (только для тестов: повтор nonce разрушает безопасность GCM).",
+    )
+    parser.add_argument(
+        "--aad",
+        required=False,
+        default=None,
+        help="Дополнительные аутентифицируемые данные (AAD) в hex, только для режима gcm. "
+             "Если не указаны, считаются пустыми. При расшифровании должны совпадать с указанными при шифровании.",
     )
     parser.add_argument("--input", required=True, help="Путь к входному файлу.")
     parser.add_argument(
@@ -86,7 +96,7 @@ def parse_and_validate(argv=None) -> argparse.Namespace:
 
     args.iv_bytes = None
     if args.iv is not None:
-        if args.encrypt:
+        if args.encrypt and args.mode != "gcm":
             parser.error("--iv нельзя указывать при шифровании: IV генерируется автоматически")
         if args.mode == "ecb":
             parser.error("режим ecb не использует IV, --iv указывать нельзя")
@@ -94,11 +104,21 @@ def parse_and_validate(argv=None) -> argparse.Namespace:
             args.iv_bytes = bytes.fromhex(args.iv)
         except ValueError:
             parser.error("--iv должен быть корректной шестнадцатеричной строкой")
-        if len(args.iv_bytes) != IV_LENGTH_BYTES:
+        expected_length = GCM_NONCE_LENGTH_BYTES if args.mode == "gcm" else IV_LENGTH_BYTES
+        if len(args.iv_bytes) != expected_length:
             parser.error(
-                f"--iv должен содержать {IV_LENGTH_BYTES} байт ({IV_LENGTH_BYTES * 2} hex-символов), "
+                f"--iv должен содержать {expected_length} байт ({expected_length * 2} hex-символов), "
                 f"получено {len(args.iv_bytes)} байт"
             )
+
+    args.aad_bytes = b""
+    if args.aad is not None:
+        if args.mode != "gcm":
+            parser.error("--aad допустим только в режиме gcm")
+        try:
+            args.aad_bytes = bytes.fromhex(args.aad)
+        except ValueError:
+            parser.error("--aad должен быть корректной шестнадцатеричной строкой")
 
     if not Path(args.input).is_file():
         parser.error(f"входной файл не найден: {args.input}")
