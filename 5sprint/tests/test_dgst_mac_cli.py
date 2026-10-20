@@ -136,6 +136,20 @@ def test_verify_parses_expected_file_flexibly(make_content, tmp_path):
     assert result.returncode == 0, result.err
 
 
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-16-le", "utf-16-be"])
+def test_verify_accepts_files_with_bom_and_utf16(encoding, tmp_path):
+    # Windows PowerShell 5.1 при перенаправлении `>` создаёт файл UTF-16 с BOM
+    (tmp_path / "file.txt").write_bytes(b"powershell")
+    mac_line = dgst(*hmac_args(), cwd=tmp_path).out
+    data = mac_line.replace("\n", "\r\n").encode(encoding)
+    if encoding in ("utf-16-le", "utf-16-be"):
+        data = (b"\xff\xfe" if encoding == "utf-16-le" else b"\xfe\xff") + data
+    (tmp_path / "expected.txt").write_bytes(data)
+
+    result = dgst(*hmac_args(), "--verify", "expected.txt", cwd=tmp_path)
+    assert result.returncode == 0, result.err
+
+
 @pytest.mark.parametrize("content", [b"", b"   \n", b"not hex at all\n", b"\xff\xfe\x00"])
 def test_verify_with_malformed_expected_file_fails(content, tmp_path):
     (tmp_path / "file.txt").write_bytes(b"data")
