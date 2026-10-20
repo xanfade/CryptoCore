@@ -2,7 +2,7 @@
 
 Инструмент командной строки для шифрования файлов блочным шифром AES-128 в режимах ECB, CBC, CFB, OFB и CTR
 с криптостойкой генерацией ключей и векторов инициализации, а также для вычисления хешей файлов
-(SHA-256 и SHA3-256, реализованы с нуля).
+(SHA-256 и SHA3-256) и кодов аутентификации сообщений (HMAC и AES-CMAC); всё реализовано с нуля.
 
 ## Инструкции по сборке
 
@@ -10,7 +10,7 @@
 
    ```bash
    git clone <repository-url>
-   cd CryptoCore/4sprint
+   cd CryptoCore/5sprint
    ```
 
 2. (Рекомендуется) Создайте и активируйте виртуальное окружение:
@@ -172,20 +172,28 @@ cryptocore --algorithm aes --mode ctr --decrypt \
 
 ## Вычисление хеша файла (команда `dgst`)
 
-Отдельная подкоманда `dgst` вычисляет контрольную сумму файла. Она не принимает аргументы шифрования
-(`--key`, `--mode`, `--encrypt`/`--decrypt`, `--iv`): при их указании программа выводит ошибку.
+Отдельная подкоманда `dgst` вычисляет контрольную сумму файла или код аутентификации (HMAC, AES-CMAC).
+Она не принимает аргументы шифрования (`--mode`, `--encrypt`/`--decrypt`, `--iv`): при их указании программа
+выводит ошибку. Флаг `--key` здесь допустим только вместе с `--hmac` или `--cmac`.
 
 ```bash
 cryptocore dgst --algorithm <алгоритм> --input <файл> [--output <файл>]
+cryptocore dgst --algorithm sha256 --hmac --key <ключ_hex> --input <файл> [--output <файл> | --verify <файл>]
+cryptocore dgst --cmac --key <ключ_hex_16_байт> --input <файл> [--output <файл> | --verify <файл>]
 ```
 
 | Аргумент | Описание |
 | --- | --- |
-| `--algorithm` | `sha256` или `sha3-256`. |
+| `--algorithm` | `sha256` или `sha3-256` (с `--hmac` — хеш-функция для HMAC). С `--cmac` можно не указывать или указать `aes`. |
 | `--input` | Путь к входному файлу. Значение `-` означает чтение из стандартного ввода. |
 | `--output` | Необязательный. Записать результат в файл вместо вывода в stdout (формат строки тот же). |
+| `--hmac` | Вычислить HMAC (RFC 2104). Требует `--key`. |
+| `--cmac` | Вычислить AES-CMAC (бонус). Требует `--key` ровно из 16 байт. |
+| `--key` | Ключ в hex. Для `--hmac` — любой длины, для `--cmac` — 32 hex-символа. Без `--hmac`/`--cmac` не допускается. |
+| `--verify` | Файл с ожидаемым значением MAC: вычисленное значение сравнивается с ним. Нельзя использовать вместе с `--output`. |
 
-Вывод — одна строка в формате утилит `sha256sum`/`sha3sum`: `<хеш в нижнем регистре><два пробела><путь>`.
+Вывод — одна строка в формате утилит `sha256sum`/`sha3sum`: `<значение в нижнем регистре><два пробела><путь>`.
+Для HMAC и CMAC формат тот же.
 
 ### Примеры
 
@@ -255,6 +263,128 @@ openssl dgst -sha3-256 -r large_file.iso
 - Для хранения паролей обычные хеши не подходят (слишком быстрые): нужны bcrypt, scrypt или Argon2.
 - Реализации учебные, на чистом Python и не защищены от атак по сторонним каналам; скорость ~0,4–0,5 МБ/с
   (в тысячи раз медленнее `hashlib` и `sha256sum`), см. [TESTING.md](TESTING.md).
+
+## Код аутентификации сообщения: HMAC
+
+HMAC подтверждает и **целостность**, и **подлинность** данных: подделать значение может только тот, кто знает секретный ключ.
+
+### Генерация и проверка HMAC
+
+Генерация (ключ — hex-строка произвольной длины):
+
+```bash
+cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input message.txt
+```
+
+```text
+<64 hex-символа HMAC>  message.txt
+```
+
+Пример из RFC 4231 (тестовый случай 1; ключ из 20 байт `0b`):
+
+```bash
+echo -n "Hi There" > test_file.txt
+cryptocore dgst --algorithm sha256 --hmac --key 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b --input test_file.txt
+```
+
+```text
+b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7  test_file.txt
+```
+
+Сохранение значения в файл и проверка через `--verify`:
+
+```bash
+cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input message.txt --output expected_hmac.txt
+cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input message.txt --verify expected_hmac.txt
+```
+
+```text
+[OK] HMAC verification successful
+```
+
+При успехе код возврата 0. При несовпадении (файл изменён или указан другой ключ) в stderr выводится
+`[ERROR] HMAC verification failed`, код возврата 1. Если файл с ожидаемым значением не читается или в нём нет
+шестнадцатеричного значения, выводится `[ERROR] ...` и код возврата тоже ненулевой.
+
+Файл с ожидаемым значением читается гибко: берётся первое слово, регистр и имя файла игнорируются, поэтому
+подходит как вывод самой программы (`ЗНАЧЕНИЕ  ИМЯ`), так и просто значение.
+
+Проверка вручную через `diff`:
+
+```bash
+cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input message.txt > computed_hmac.txt
+diff computed_hmac.txt expected_hmac.txt
+```
+
+Обнаружение подделки:
+
+```bash
+echo "original content" > file.txt
+cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input file.txt > original_hmac.txt
+echo "modified content" > file.txt
+cryptocore dgst --algorithm sha256 --hmac --key 00112233445566778899aabbccddeeff --input file.txt --verify original_hmac.txt
+echo "код возврата: $?"
+```
+
+```text
+[ERROR] HMAC verification failed
+код возврата: 1
+```
+
+Сверка с OpenSSL:
+
+```bash
+openssl dgst -sha256 -mac HMAC -macopt hexkey:00112233445566778899aabbccddeeff -r message.txt
+```
+
+### Как устроен HMAC
+
+HMAC реализован с нуля по RFC 2104 поверх собственного SHA-256 из спринта 4 (`src/cryptocore/mac/hmac.py`):
+
+```text
+HMAC(K, m) = H((K xor opad) || H((K xor ipad) || m))
+```
+
+где `H` — SHA-256, `ipad` — байт `0x36`, повторённый по размеру блока (64 байта), `opad` — байт `0x5c`.
+Обработка ключа: ключ длиннее блока (64 байта) сначала хешируется, ключ короче блока дополняется нулями до 64 байт,
+поэтому поддерживаются ключи любой длины. Входной файл читается порциями по 8192 байта и подаётся во «внутренний»
+хеш по мере чтения, так что память не зависит от размера файла. С `--algorithm sha3-256` HMAC строится на SHA3-256
+(размер блока 136 байт).
+
+### Свойства безопасности HMAC
+
+- Без знания ключа нельзя ни вычислить корректный HMAC, ни подделать значение для изменённого сообщения;
+  изменение даже одного бита сообщения или ключа полностью меняет результат.
+- В отличие от `H(ключ || сообщение)`, конструкция HMAC не подвержена атаке удлинением сообщения, хотя SHA-256
+  построен по схеме Меркла — Дамгора.
+- Стойкость HMAC определяется длиной и случайностью ключа: используйте ключ не короче 16 байт, сгенерированный
+  криптостойким генератором (например, из `cryptocore --encrypt` без `--key`). Ключ длиннее блока не даёт
+  дополнительной стойкости: он сводится к своему хешу.
+- Значения сравниваются за постоянное время (`secrets.compare_digest`), чтобы не раскрывать, сколько первых
+  символов совпало.
+- HMAC не обеспечивает неотказуемости (не является электронной подписью: проверяющий знает тот же ключ) и не
+  скрывает содержимое сообщения (для конфиденциальности нужно шифрование).
+- Реализация учебная, на чистом Python, и не защищена от атак по сторонним каналам.
+
+## AES-CMAC (бонус)
+
+AES-CMAC (NIST SP 800-38B, RFC 4493) — код аутентификации на основе блочного шифра AES-128
+(`src/cryptocore/mac/cmac.py`, используется AES-примитив из первых спринтов). Реализованы генерация подключей K1 и K2
+(удвоение в поле GF(2^128) с константой `0x87`), цепочка CBC-MAC и XOR последнего блока с K1 (полный блок)
+или с K2 (блок с дополнением `0x80 00…00`). Ключ — ровно 16 байт.
+
+```bash
+cryptocore dgst --cmac --key 2b7e151628aed2a6abf7158809cf4f3c --input message.bin
+cryptocore dgst --cmac --key 2b7e151628aed2a6abf7158809cf4f3c --input message.bin --output cmac.txt
+cryptocore dgst --cmac --key 2b7e151628aed2a6abf7158809cf4f3c --input message.bin --verify cmac.txt
+```
+
+Сообщение при успешной проверке: `[OK] CMAC verification successful`, при ошибке: `[ERROR] CMAC verification failed`.
+Сверка с OpenSSL:
+
+```bash
+openssl mac -cipher AES-128-CBC -macopt hexkey:2b7e151628aed2a6abf7158809cf4f3c -in message.bin CMAC
+```
 
 ## Проверка цикла шифрования/расшифрования
 
@@ -383,17 +513,20 @@ pytest
 ## Структура проекта
 
 ```
-4sprint/
+5sprint/
 ├── src/
 │   └── cryptocore/
 │       ├── __init__.py
 │       ├── __main__.py     # Точка входа CLI, ключ и IV
 │       ├── cli_parser.py   # Разбор и проверка аргументов
 │       ├── csprng.py       # CSPRNG: generate_random_bytes
-│       ├── dgst.py         # Команда dgst: чтение файла кусками, вывод
+│       ├── dgst.py         # Команда dgst: хеш, HMAC, CMAC, --verify
 │       ├── hash/
 │       │   ├── sha256.py   # SHA-256 (FIPS 180-4)
 │       │   └── sha3_256.py # SHA3-256 (FIPS 202, Keccak)
+│       ├── mac/
+│       │   ├── hmac.py     # HMAC (RFC 2104)
+│       │   └── cmac.py     # AES-CMAC (NIST SP 800-38B)
 │       ├── key_checks.py   # Обнаружение слабых ключей
 │       ├── file_io.py      # Чтение/запись бинарных файлов
 │       └── modes/
