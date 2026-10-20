@@ -27,11 +27,18 @@ pytest tests/test_csprng.py
    Documentation and Software), распакуйте и соберите:
 
    ```bash
-   cd sts-2.1.2
+   cd sts-2.1.2/sts-2.1.2        # архив распаковывается во вложенный каталог
    make
+   mkdir -p experiments/AlgorithmTesting
+   for t in Frequency BlockFrequency Runs LongestRun Rank FFT NonOverlappingTemplate \
+            OverlappingTemplate Universal LinearComplexity Serial ApproximateEntropy \
+            CumulativeSums RandomExcursions RandomExcursionsVariant; do
+     mkdir -p experiments/AlgorithmTesting/$t
+   done
    ```
 
-   Нужен компилятор C. В Windows используйте WSL или Cygwin.
+   Нужен компилятор C (проверено с `gcc 11.4`). В Windows используйте WSL или Cygwin. Каталоги для результатов
+   нужно создать заранее: без них `assess` завершается с ошибкой `Could not open freq file`.
 
 3. Запустите набор, указав длину одной последовательности в битах:
 
@@ -61,25 +68,40 @@ pytest tests/test_csprng.py
 
 ### Результаты официального STS
 
-> Заполняется после запуска STS на машине с компилятором C.
+Запуск выполнен на официальном NIST STS 2.1.2 (архив `sts-2_1_2.zip` с сайта NIST, SHA-256
+`0238D2F1D26E120E3CC748ED2D4C674CDC636DE37FC4027C76CC2A394FFF9157`), собранном `gcc 11.4` в Ubuntu 22.04 (WSL).
+Данные: 10 000 000 байт (80 000 000 бит), созданные `generate_random_bytes` (`scripts/generate_nist_data.py`),
+80 последовательностей по 1 000 000 бит, все 15 тестов, длительность 271 с. Ответы на запросы `assess`:
+`0`, путь к файлу, `1`, `0`, `80`, `1`. Полный отчёт: [`NIST_STS_REPORT.txt`](NIST_STS_REPORT.txt)
+(это файл `finalAnalysisReport.txt`, созданный STS).
 
-| Тест | Прошло / всего | P-VALUE (равномерность) | Итог |
-| --- | --- | --- | --- |
-| Frequency | | | |
-| BlockFrequency | | | |
-| CumulativeSums | | | |
-| Runs | | | |
-| LongestRun | | | |
-| Rank | | | |
-| FFT | | | |
-| NonOverlappingTemplate | | | |
-| OverlappingTemplate | | | |
-| Universal | | | |
-| ApproximateEntropy | | | |
-| RandomExcursions | | | |
-| RandomExcursionsVariant | | | |
-| Serial | | | |
-| LinearComplexity | | | |
+Всего STS выдал 188 строк результатов (многие тесты состоят из нескольких подтестов). Для 80 последовательностей STS
+считает минимально допустимым 76 прошедших (для тестов Random Excursions — 49 из 52).
+
+| Тест | Подтестов | Прошло последовательностей (мин–макс) | Минимум | Мин. P-VALUE равномерности | Итог |
+| --- | --- | --- | --- | --- | --- |
+| Frequency | 1 | 79 из 80 | 76 | 0,227773 | пройден |
+| BlockFrequency | 1 | 80 из 80 | 76 | 0,663130 | пройден |
+| CumulativeSums | 2 | 79 из 80 | 76 | 0,371101 | пройден |
+| Runs | 1 | 77 из 80 | 76 | 0,509162 | пройден |
+| LongestRun | 1 | 79 из 80 | 76 | 0,559523 | пройден |
+| Rank | 1 | 79 из 80 | 76 | 0,585209 | пройден |
+| FFT | 1 | 80 из 80 | 76 | 0,855534 | пройден |
+| NonOverlappingTemplate | 148 | 75–80 из 80 | 76 | 0,001399 | 147 из 148 подтестов пройдено (один: 75 из 80) |
+| OverlappingTemplate | 1 | 78 из 80 | 76 | 0,072289 | пройден |
+| Universal | 1 | 80 из 80 | 76 | 0,855534 | пройден |
+| ApproximateEntropy | 1 | 79 из 80 | 76 | 0,534146 | пройден |
+| RandomExcursions | 8 | 50–52 из 52 | 49 | 0,236810 | пройден |
+| RandomExcursionsVariant | 18 | 50–52 из 52 | 49 | 0,108791 | пройден |
+| Serial | 2 | 79–80 из 80 | 76 | 0,714660 | пройден |
+| LinearComplexity | 1 | 80 из 80 | 76 | 0,637119 | пройден |
+
+**Вывод.** Ни один из 15 тестов не провален массово: 187 из 188 подтестов уложились в допустимую долю прошедших
+последовательностей. Единственное отклонение — один из 148 подтестов NonOverlappingTemplate (75 из 80 при минимуме 76),
+STS пометил его звёздочкой. Равномерность P-VALUE у всех 188 строк не ниже 0,0001 (минимум 0,001399), а P-VALUE ниже 0,01
+получилось у 2 строк из 188, что близко к ожидаемым 1,9. Это соответствует критерию «большинство тестов пройдено, единичные
+отклонения статистически ожидаемы»: генератор признаков дефекта не показал. Результат относится к одной выборке; при
+повторе данных конкретные числа изменятся.
 
 ## Быстрая самопроверка без STS
 
