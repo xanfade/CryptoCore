@@ -8,7 +8,7 @@
 
    ```bash
    git clone <repository-url>
-   cd CryptoCore
+   cd CryptoCore/1sprint
    ```
 
 2. (Рекомендуется) Создайте и активируйте виртуальное окружение:
